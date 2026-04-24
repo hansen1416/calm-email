@@ -1,0 +1,38 @@
+[Unit]
+Description=Mail Flow Backend Service
+After=network.target mysql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/mailflow/pythonBack
+
+# 环境变量
+Environment="PATH=/var/www/mailflow/pythonBack/.venv/bin"
+Environment="PYTHONPATH=/var/www/mailflow/pythonBack"
+EnvironmentFile=/var/www/mailflow/pythonBack/.env
+
+# 启动命令
+ExecStart=/var/www/mailflow/pythonBack/.venv/bin/gunicorn -c gunicorn.conf.py app:app
+
+# 重载命令
+ExecReload=/bin/kill -s HUP $MAINPID
+
+# 停止命令
+ExecStop=/bin/kill -s TERM $MAINPID
+
+# 重启策略
+Restart=on-failure
+RestartSec=5
+
+# 启动/停止超时
+TimeoutStartSec=30
+TimeoutStopSec=30
+
+# 资源限制
+# MemoryLimit=512M
+# CPUQuota=200%
+
+[Install]
+WantedBy=multi-user.target
