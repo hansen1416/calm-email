@@ -1,5 +1,100 @@
 # Changelog
 
+## [待实施] 用户邮箱白名单与系统域名迁移方案 📋
+
+**日期**: 2026-04-25
+**版本**: v2.0.0 (计划)
+**状态**: 待开始 ⏳
+**提交点**: e6c85d4 (实施前版本)
+
+---
+
+### 需求概述
+
+实现用户绑定自己的邮箱作为发件箱，支持前期验证个人邮箱、后期迁移到系统域名的双模式架构。
+
+### 核心设计
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ 配置开关: EMAIL_SENDER_MODE                              │
+│ 值: 'personal'(前期) | 'system'(后期)                     │
+└─────────────────────────────────────────────────────────┘
+│
+┌───────────────┴───────────────┐
+▼                               ▼
+┌─────────────────┐         ┌─────────────────┐
+│  personal 模式  │         │   system 模式   │
+│ 用户验证自己邮箱 │         │ 系统分配子邮箱  │
+└────────┬────────┘         └────────┬────────┘
+│                                      │
+▼                                      ▼
+user@gmail.com              user001@mail.yourdomain.com
+占用 SES 验证额度            不占用额度(子邮箱)
+```
+
+### 数据模型（无外键约束）
+
+| 表名 | 用途 | 关键字段 |
+|------|------|---------|
+| `email_quota_config` | 配额配置模板 | id, name, daily_limit, price_monthly |
+| `user_sender_binding` | 用户发件绑定 | user_id, email, email_type, verification_token |
+| `user_subscription` | 用户订阅(预留) | user_id, quota_config_id, payment_provider |
+| `notification` | 系统通知 | user_id, type, title, content |
+
+### .env 配置预留
+
+```ini
+# 邮件发送模式
+EMAIL_SENDER_MODE=personal
+SYSTEM_DOMAIN=
+SYSTEM_SENDER_PREFIX=user
+DEFAULT_DAILY_QUOTA=100
+QUOTA_RESET_HOUR=0
+
+# 升级功能开关(预留)
+UPGRADE_FEATURE_ENABLED=false
+
+# 多支付服务商(并列关系，用户可选)
+PAYMENT_ALIPAY_ENABLED=false
+PAYMENT_WECHAT_ENABLED=false
+PAYMENT_STRIPE_ENABLED=false
+
+# 自动迁移
+MIGRATION_USER_THRESHOLD=8000
+```
+
+### 实施里程碑
+
+| 阶段 | 任务 | 状态 | 实际时间 |
+|------|------|------|---------|
+| M1 | 数据模型(QuotaConfig, SenderBinding, Subscription, Notification) | ✅ 已完成(2026-04-25) | 20min |
+| M2 | API: 邮箱绑定/验证/解绑/列表 | ✅ 已完成(2026-04-25) | 35min |
+| M3 | API: 配额查询与检查 | ✅ 已完成(2026-04-25) | (含M2内) |
+| M4 | 改造发送逻辑(双模式) | ✅ 已完成(2026-04-25) | 30min |
+| M5 | 回复转发+通知系统 | ✅ 已完成(2026-04-25) | 25min |
+| M6 | 前端: 邮箱管理页面 | ✅ 已完成(2026-04-25) | 45min |
+| M7 | 前端: 发送时选择发件人 | ✅ 已完成(2026-04-25) | 20min |
+| M8 | 预留支付接口(后端) | ✅ 已完成(2026-04-25) | 25min |
+| M9 | 迁移脚本 | ✅ 已完成(2026-04-25) | 30min |
+| M10 | 测试+文档+数据库更新 | ✅ 已完成(2026-04-25) | 20min |
+
+### 关键设计约束
+
+1. **无外键约束**: 所有表关联通过代码逻辑实现
+2. **双模式共存**: personal/system 模式代码共存，配置切换
+3. **多支付方式**: 并列关系，用户支付时可选择
+4. **迁移触发**: 8000用户时通知管理员，手动执行迁移
+5. **回复处理**: 转发到用户真实邮箱 + 系统内通知
+
+### 兼容性
+
+- 不破坏现有工作流、邮件发送逻辑
+- 向后兼容：现有 EmailLog 等数据无需修改
+- 平滑迁移：切换模式时保留历史绑定记录
+
+---
+
 ## [归档] 历史版本变更记录
 
 <details>
@@ -477,7 +572,7 @@
 **当前代码中的敏感信息**:
 ```python
 # pythonBack/config.py 第 17-18 行
-KEY_ID = ''  # 必须移到环境变
+KEY_ID = ''  # 必须移到环境变量
 ACCESS_KEY = ''  # 安全风险
 ```
 
@@ -999,3 +1094,112 @@ ALTER TABLE group_contacts DROP FOREIGN KEY IF EXISTS group_contacts_ibfk_2;
 **日期**: 2026-04-21
 **版本**: v1.1.1
 **状态**: 事件追踪字段完整，修复 message_id 不匹配问题
+
+---
+
+## [待实施] SES Configuration Set 配置集支持 📋
+**日期**: 2026-04-25
+**版本**: v1.2.0 (计划中)
+**状态**: 开发中 🔄
+**提交点**: df5c008 (实施前版本)
+
+### 需求概述
+为 SES 白名单验证的邮箱添加 Configuration Set（配置集）支持，用于邮件事件追踪（打开、点击、送达等）。
+
+### 核心设计原则
+1. **前端无感知** - 用户界面无需任何改动
+2. **全局配置优先** - `.env` 指定默认配置集
+3. **预留扩展** - 用户绑定表预留字段，支持后期按邮箱单独配置
+4. **向后兼容** - 不配置时不影响现有功能
+
+### 优先级逻辑
+```
+send_email() 时 ConfigurationSetName 的确定:
+│
+├─ 1. 用户绑定邮箱的 configuration_set_name (如已设置)
+│
+├─ 2. .env 中的 SES_CONFIGURATION_SET_NAME 全局配置
+│
+└─ 3. 都不配置 → 不发送 ConfigurationSetName 参数
+```
+
+### 数据库变更
+
+#### 新增字段 (user_sender_binding 表)
+```sql
+-- MySQL 5.7 兼容
+ALTER TABLE user_sender_binding 
+ADD COLUMN configuration_set_name VARCHAR(100) DEFAULT NULL 
+COMMENT 'SES配置集名称（预留，优先于全局配置）';
+```
+
+### .env 配置
+```ini
+# SES Configuration Set（可选）
+# 用于邮件事件追踪（打开、点击、送达等）
+# 在 AWS SES 控制台创建配置集后填写名称
+SES_CONFIGURATION_SET_NAME=mailflow-tracking
+```
+
+### 实施范围
+
+| 层级 | 修改内容 | 文件 |
+|------|---------|------|
+| 数据库 | 添加预留字段 | `update_schema.sql` |
+| 模型 | UserSenderBinding 添加字段 | `models.py` |
+| 配置 | 读取环境变量 | `config.py` |
+| 发送 | send_ses_email 集成配置集 | `routes/email.py` |
+| API | get_sender_for_user 返回配置集 | `routes/email.py` |
+
+### 代码修改要点
+
+#### 1. send_ses_email 函数改造
+```python
+def send_ses_email(to_email, subject, body_html, source=None, reply_to=None, binding=None):
+    kwargs = {...}
+    
+    # 配置集优先级：binding > 全局 > 无
+    config_set = None
+    if binding and binding.configuration_set_name:
+        config_set = binding.configuration_set_name
+    else:
+        config_set = cfg.get('SES_CONFIGURATION_SET_NAME')
+    
+    if config_set:
+        kwargs['ConfigurationSetName'] = config_set
+    
+    response = client.send_email(**kwargs)
+```
+
+#### 2. get_sender_for_user 函数改造
+```python
+# 返回绑定对象，供后续获取配置集
+def get_sender_for_user(user_id, sender_binding_id=None):
+    ...
+    return binding, source_email, reply_to_email, None
+```
+
+### 兼容性
+- ✅ 不配置 SES_CONFIGURATION_SET_NAME 时，邮件发送行为不变
+- ✅ 前端无改动，完全无感知
+- ✅ 现有 EmailLog 等数据无需迁移
+- ✅ 支持平滑启用（随时添加配置集）
+
+### 实施里程碑
+
+| 阶段 | 任务 | 状态 | 预计时间 |
+|------|------|------|---------|
+| 1 | 更新 changelog.md | ✅ 已完成 | 5min |
+| 2 | 修改 models.py 添加字段 | ✅ 已完成 | 5min |
+| 3 | 生成 SQL 更新语句 (MySQL 5.7) | ✅ 已完成 | 5min |
+| 4 | 修改 config.py 读取配置 | ✅ 已完成 | 5min |
+| 5 | 修改 routes/email.py 集成配置集 | ✅ 已完成 | 10min |
+| 6 | 测试验证不破坏现有功能 | ⏳ 待开始 | 10min |
+
+### 注意事项
+1. **缩进谨慎** - Python 代码缩进严格，编辑时注意保持
+2. **None 处理** - configuration_set_name 可能为 None，需做空值判断
+3. **AWS API** - ConfigurationSetName 只在发送邮件时指定，不在绑定邮箱时设置
+4. **测试** - 测试模拟模式和真实 SES 模式都要验证
+
+---
